@@ -1,0 +1,11 @@
+[Entry]{
+    int a = 2;
+    WriteLine("Hi!");
+    if(a){
+        Power(a, 2) -> a -> PrintA();
+    }
+}
+
+[PrintA](int a){
+    WriteLine(a);
+}
