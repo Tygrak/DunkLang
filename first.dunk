@@ -1,11 +1,18 @@
 [Entry]{
     int a = 2;
     WriteLine("Hi!");
+    WriteLine(a);
+    3 -> a;
     if(a){
-        Power(a, 2) -> a -> PrintA();
+        Power(a, 2) -> WriteLine();
     }
+    PrintAA(a);
 }
 
-[PrintA](int a){
-    WriteLine(a);
+[PrintAA](int a){
+    AddInts(a, a) -> WriteLine();
+}
+
+[AddInts](int a, int b){
+    a + b -> return;
 }

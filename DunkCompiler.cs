@@ -9,6 +9,8 @@ namespace DunkLang{
         public string program = "";
         public string transpiled = "";
         public Process process;
+        public List<Variable> variables = new List<Variable>();
+        public Function currentFunction;
         public bool debug = true;
 
         public DunkCompiler(string program, string path){
@@ -43,7 +45,6 @@ namespace DunkLang{
             while(nextFunc != null){
                 if(position == -1){
                     nextFunc = null;
-                    if(debug) Console.WriteLine("End.");
                     continue;
                 }
                 int nextPos = program.IndexOf("]", position);
@@ -86,38 +87,143 @@ namespace DunkLang{
             return funcs.ToArray();
         }
 
-        public string[] GetCommands(Function func){
-            List<string> commands = new List<string>();
-            string nextCommand = "";
-            int breaker = 0;
-            string content = func.content.Trim();
-            int position = 0;
-            while(nextCommand != null){
-                int nextPos = program.IndexOf(";", position);
-                if(nextPos == -1){
-                    nextCommand = null;
-                    if(debug) Console.WriteLine("End.");
-                    continue;
+        public Function[] ReorderFunctions(Function[] functions){
+            if(debug) Console.WriteLine("Reordering functions.");
+            for (int i = 0; i < functions.Length; i++){
+                for (int j = 0; j < i; j++){
+                    if(functions[j].content.Contains(functions[i].name)){
+                        Function temp = functions[j];
+                        functions[j] = functions[i];
+                        functions[i] = temp;
+                        if(debug){
+                            for (int t = 0; t < functions.Length; t++){
+                                Console.Write(functions[t].name);
+                                if(t != functions.Length-1) Console.Write(" -> ");
+                            }
+                            Console.WriteLine();
+                        }
+                    }
                 }
-                nextCommand = program.Substring(position, nextPos-position);
-                if(debug){
-                    Console.WriteLine("c" + breaker.ToString() + " : " + nextCommand);
-                }
-                breaker++;
-                if(breaker > int.MaxValue-1){
-                    throw new Exception("Max func limit reached");
-                }
-                position = nextPos+1;
-                commands.Add(nextCommand);
             }
-            return commands.ToArray();
+            return functions;
+        }
+
+        public Variable GetLocalVariable(string name){
+            Variable varb = variables.Find((Variable x) => {return x.name.Equals(name);});
+            if(varb == null){
+                varb = currentFunction.variables.Find((Variable x) => {return x.name.Equals(name);});
+            }
+            return varb;
+        }
+
+        public string GetBracketedValue(string str){
+            return str.Substring(str.IndexOf("(")+1, str.IndexOf(")") - str.IndexOf("(")-1);
+        }
+
+        public string TranspileOp(string op){
+            string trans = "";
+            int value;
+            if(op.StartsWith("WriteLine")){
+                string bracketed = GetBracketedValue(op);
+                trans += "printf(";
+                if(bracketed.StartsWith("\"") && bracketed.EndsWith("\"")){
+                    trans += bracketed;
+                } else{
+                    Variable varb = GetLocalVariable(bracketed);
+                    if(varb != null){
+                        if(varb.type == "int"){
+                            trans += "\"%d\\n\", " + varb.name;
+                        } else if(varb.type == "float"){
+                            trans += "\"%f\\n\", " + varb.name;
+                        }
+                    } else{
+                        
+                    }
+                }
+                trans += ")";
+            } else if(int.TryParse(op, out value)){
+                trans += value.ToString();
+            }
+            return trans;
+        }
+
+        public string TranspileCommand(string line){
+            string trans = "";
+            if(line.Contains(" = ")){
+                trans += line;
+                int pos = line.IndexOf(" ");
+                int pos2 = line.IndexOf(" ", pos+1) > line.IndexOf("=", pos+1) ? line.IndexOf("=", pos+1) : line.IndexOf(" ", pos+1);
+                Variable nVar = new Variable(line.Substring(0, pos), line.Substring(pos+1, pos2-pos-1));
+                //if(debug) Console.WriteLine("foundvar-> " + nVar.type + " : " + nVar.name);
+                variables.Add(nVar);
+            } else{
+                //Example: Power(a, 2) -> WriteLine();
+                //Target: printf((a*a));
+                //Algorithm: (a*a) => printf("%d\n", (a*a))  
+                string[] ops = line.Split("->", StringSplitOptions.RemoveEmptyEntries);
+                for (int i = 0; i < ops.Length; i++){
+                    ops[i] = ops[i].Trim();
+                    ops[i] = ops[i].Trim(';');
+                    //Console.WriteLine(ops[i] + ", " + (GetLocalVariable(ops[i]) != null) + ", i: " + i);
+                    if(i == 0){
+                        trans += TranspileOp(ops[i]);
+                    } else if(GetLocalVariable(ops[i]) != null){
+                        trans = trans.Insert(0, (ops[i] + " = "));
+                        continue;
+                    }
+                }
+                if(ops.Length != 0){
+                    trans += ";";
+                }
+            }
+            return trans;
         }
 
         public void Transpile(){
             Function[] functions = GetFunctions();
+            ReorderFunctions(functions);
+            transpiled = "#include<stdio.h>\n\n";
             for (int i = 0; i < functions.Length; i++){
-                Console.WriteLine(functions[i].name + " : " + functions[i].content);
-                //string[] commands = GetCommands(functions[i]);
+                currentFunction = functions[i];
+                if(functions[i].name == "Entry"){
+                    transpiled += "int main(int argc, char *argv[]){\n";
+                } else{
+                    if(functions[i].returns == ""){
+                        transpiled += "void ";
+                    } else{
+                        transpiled += functions[i].returns + " ";
+                    }
+                    transpiled += functions[i].name + "(" + functions[i].args + "){\n";
+                }
+                string[] lines = functions[i].content.Split("\n", StringSplitOptions.RemoveEmptyEntries);
+                int depth = 1;
+                for (int j = 0; j < lines.Length; j++){
+                    string line = lines[j].Trim();
+                    if(j != 0){
+                        transpiled += "\n";
+                    }
+                    for (int t = 0; t < depth; t++){
+                        transpiled += "    ";
+                    }
+                    if(line.Contains("if")){
+                        transpiled += "if(";
+                        string bracketed = GetBracketedValue(line);
+                        transpiled += bracketed + "){";
+                        depth++;
+                    } else if(line.Contains("}")){
+                        transpiled = transpiled.Remove(transpiled.Length-4);
+                        transpiled += "}";
+                        depth--;
+                    } else{
+                        transpiled += TranspileCommand(line);
+                    }
+                }
+                transpiled += "\n}\n\n";
+            }
+            if(debug){
+                Console.WriteLine();
+                Console.WriteLine("------Compiled to------");
+                Console.WriteLine(transpiled);
             }
             /*transpiled = transpiled.Insert(0, "#include<stdio.h>\nint main(int argc, char *argv[]){\n");
             transpiled += program;
